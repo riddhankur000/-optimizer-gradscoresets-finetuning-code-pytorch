@@ -1,0 +1,237 @@
+# Copyright 2025 Multi-Task Math Training
+# Configuration file for Llama 3.1 8B LoRA fine-tuning on math datasets
+# Single unified config with optimizer and GPU profiles
+
+################################## ACTIVE PROFILES (SELECT HERE) ##################################
+active_profiles:
+  # Select optimizer profile: "adamw" or "muon"
+  optimizer: "adamw"
+  
+  # Select GPU profile: "gpu_0", "gpu_1", "gpu_multi", "cpu"
+  gpu: "gpu_multi"
+
+################################## MODEL CONFIGURATION ##################################
+model_config:
+  # Model identifier and source
+  model_name: "llama-3.1-8b"
+  model_source: "huggingface"  # huggingface, local_path
+  model_id: "meta-llama/Llama-3.1-8B"
+  
+  # Model dtype
+  torch_dtype: "bfloat16"  # bfloat16, float16, float32
+  
+  # Device mapping
+  device_map: "auto"
+
+################################## TOKENIZER CONFIGURATION ##################################
+tokenizer_config:
+  tokenizer_path: "meta-llama/Llama-3.1-8B"
+  tokenizer_type: "huggingface"
+  model_max_length: 512
+  padding_side: "right"
+  use_fast: true
+
+################################## LoRA CONFIGURATION ##################################
+lora_config:
+  enabled: true
+  lora_rank: 16
+  lora_alpha: 512
+  lora_dropout: 0.05
+  bias: "none"
+  task_type: "CAUSAL_LM"
+  target_modules:
+    - "q_proj"
+    - "v_proj"
+    - "k_proj"
+    - "o_proj"
+    - "up_proj"
+    - "down_proj"
+
+################################## DATASET CONFIGURATION ##################################
+dataset_config:
+  # Dataset path
+  dataset_path: "./colm_math_combined_dataset"
+  
+  # Dataset composition
+  dataset_names:
+    - "MetaMathQA"
+    - "GSM8K"
+  
+  # Preprocessing options
+  max_seq_length: 512
+  num_proc: 4
+  
+  # Train/val/test splits
+  train_split: "train"
+  eval_split: "validation"
+  train_ratio: 0.85
+
+################################## TRAINING CONFIGURATION ##################################
+training_config:
+  # Output directory
+  output_dir: "./out/llama-3.1-8b-math-multitask-lora"
+  
+  # Training strategy
+  training_strategy: "steps"  # epoch, steps
+  num_train_epochs: null  # Use max_steps instead
+  max_steps: 4096
+  
+  # Batch size configuration
+  per_device_train_batch_size: 8
+  per_device_eval_batch_size: 8
+  gradient_accumulation_steps: 4
+  
+  # Effective batch size = per_device_train_batch_size * gradient_accumulation_steps * num_devices
+  # = 8 * 4 * 2 = 64 (effective batch size same as before, but spread across GPUs)
+  
+  # Optimization
+  optim: "adamw_torch"
+  optim_target_modules: null
+  
+  # Learning rate
+  learning_rate: 0.0002  # 2e-4
+  lr_scheduler_type: "linear"  # linear, cosine, constant
+  warmup_ratio: 0.1
+  warmup_steps: null  # Calculated from warmup_ratio
+  
+  # Regularization
+  weight_decay: 0.01
+  max_grad_norm: 1.0
+  
+  # Optimization precision
+  fp16: false
+  bf16: true
+  
+  # Checkpointing and evaluation
+  save_strategy: "steps"  # epoch, steps, no
+  save_steps: 256
+  save_total_limit: 3
+  
+  eval_strategy: "steps"  # epoch, steps, no
+  eval_steps: 16
+  
+  # Logging
+  logging_strategy: "steps"
+  logging_steps: 10
+  log_level: "info"
+  
+  # Reproducibility
+  seed: 0
+  data_seed: 0
+  
+  # Distributed training
+  local_rank: -1
+  
+  # Other options
+  disable_tqdm: false
+  remove_unused_columns: true
+  report_to: "wandb"  # wandb, tensorboard, azure_ml, none
+  run_name: "llama-3.1-8b-multitask-lora-bs2-gas8-lr0.0002"
+
+################################## OPTIMIZER PROFILES ##################################
+# Pre-defined optimizer configurations - select one in active_profiles.optimizer
+optimizer_profiles:
+  adamw:
+    optimizer_type: "adamw"
+    adam_beta1: 0.9        # AdamW momentum
+    adam_beta2: 0.999      # AdamW momentum
+    adam_epsilon: 1e-8     # AdamW epsilon
+    # Note: learning_rate and weight_decay from training_config are used
+
+  muon:
+    optimizer_type: "muon"
+    muon_lr: 0.002                           # Learning rate for Muon (higher than AdamW)
+    muon_weight_decay: 0.1                   # Weight decay for Muon
+    muon_momentum: 0.95                      # Momentum factor
+    muon_nesterov: true                      # Enable Nesterov momentum
+    muon_ns_coefficients: [3.4445, -4.775, 2.0315]  # Newton-Schulz coefficients
+    muon_eps: 1e-7                           # Epsilon for numerical stability
+    muon_ns_steps: 5                         # Number of Newton-Schulz iterations
+    muon_adjust_lr_fn: "match_rms_adamw"    # "original" or "match_rms_adamw" (recommended for LLM)
+
+################################## GPU PROFILES ##################################
+# Pre-defined GPU configurations - select one in active_profiles.gpu
+gpu_profiles:
+  gpu_0:
+    device_ids: "0"
+    use_distributed: false
+    device_map: "auto"
+    use_tf32: true
+    
+  gpu_1:
+    device_ids: "1"
+    use_distributed: false
+    device_map: "auto"
+    use_tf32: true
+    
+  gpu_multi:
+    device_ids: "0,1"
+    use_distributed: true
+    device_map: "auto"
+    use_tf32: true
+    
+  cpu:
+    device_ids: null
+    use_distributed: false
+    device_map: "cpu"
+    use_tf32: false
+  
+################################## TOKENIZER ARGS CONFIGURATION ##################################
+tokenizer_args:
+  padding: "max_length"
+  truncation: true
+  return_tensors: "pt"
+  add_special_tokens: true
+
+################################## TRAINING BEHAVIOR ##################################
+training_behavior:
+  # Gradient checkpointing for memory efficiency
+  gradient_checkpointing: true
+  
+  # Mixed precision
+  use_cpu: false
+  use_mps_device: false
+  
+  # Distributed training
+  ddp_find_unused_parameters: false
+  ddp_bucket_fn: null
+  
+  # Resume from checkpoint
+  resume_from_checkpoint: null
+  
+  # Skip samples with loss = nan
+  skip_memory_metrics: false
+
+################################## MULTI-TASK CONFIGURATION ##################################
+multitask_config:
+  # Per-task metrics tracking
+  track_per_task_loss: true
+  
+  # Task names for tracking
+  task_names:
+    - "MetaMathQA"
+    - "GSM8K"
+  
+  # Evaluation per task
+  eval_per_task: true
+
+################################## WANDB CONFIGURATION ##################################
+wandb_config:
+  enabled: true
+  project: "llama-math-lora"
+  entity: null  # Set your entity if needed
+  notes: "Multi-task math training with Llama 3.1 8B using LoRA"
+  tags:
+    - "llama-3.1-8b"
+    - "lora-finetuning"
+    - "math-datasets"
+    - "multitask"
+
+################################## SYSTEM CONFIGURATION ##################################
+system_config:
+  num_workers: 4
+  pin_memory: true
+  prefetch_factor: 2
+
+# NOTE: GPU configuration is now in gpu_profiles section above
+# Select your GPU profile in active_profiles.gpu
