@@ -21,7 +21,7 @@ model_config:
   torch_dtype: "bfloat16"  # bfloat16, float16, float32
   
   # Device mapping
-  device_map: "auto"
+  device_map: "cuda"
 
 ################################## TOKENIZER CONFIGURATION ##################################
 tokenizer_config:
@@ -49,10 +49,11 @@ lora_config:
 
 ################################## DATASET CONFIGURATION ##################################
 dataset_config:
-  # Dataset path
-  dataset_path: "./colm_math_combined_dataset"
+  # Dataset loading strategy: "single" (one dataset) or "sequential" (task-specific)
+  loading_strategy: "sequential"  # "single" or "sequential"
   
-  # Dataset composition
+  # For single dataset loading
+  dataset_path: "./colm_math_combined_dataset"
   dataset_names:
     - "MetaMathQA"
     - "GSM8K"
@@ -65,6 +66,7 @@ dataset_config:
   train_split: "train"
   eval_split: "validation"
   train_ratio: 0.85
+  val_split_ratio: 0.1
 
 ################################## TRAINING CONFIGURATION ##################################
 training_config:
@@ -72,9 +74,9 @@ training_config:
   output_dir: "./out/llama-3.1-8b-math-multitask-lora"
   
   # Training strategy
-  training_strategy: "steps"  # epoch, steps
-  num_train_epochs: null  # Use max_steps instead
-  max_steps: 4096
+  training_strategy: "epoch"  # epoch, steps
+  num_train_epochs: 1  # Train for 1 epoch
+  max_steps: null  # Use num_train_epochs instead
   
   # Batch size configuration
   per_device_train_batch_size: 8
@@ -97,6 +99,47 @@ training_config:
   # Regularization
   weight_decay: 0.01
   max_grad_norm: 1.0
+  
+  # Riemannian training: batch size ratio for subset selection
+  # 1.0 = use full batch, 0.5 = use half batch for selection, etc.
+  small_batch_ratio: 1.0
+  
+  # Riemannian training: layer name patterns for subset selection
+  # Should match LoRA target modules for consistency
+  # Use list of strings that appear in layer names (e.g., ['q_proj', 'v_proj', 'k_proj'])
+  # Comment out to use default (same as LoRA target_modules)
+  # last_layers: ['q_proj', 'v_proj', 'k_proj', 'o_proj', 'up_proj', 'down_proj']
+  
+  # ============= Advanced Riemannian Training Options (Optional) =============
+  # Uncomment and modify these to customize Riemannian training behavior
+  
+  # Data selection strategy: 'random', 'importance', 'gradient_based'
+  # data_selection_method: "random"
+  
+  # Selection unit: MUST be 'mezo' for this Riemannian trainer (Mean Zero-Order optimization)
+  # data_selection_unit: "mezo"
+  
+  # Source-wise selection: 'none', 'per_source'
+  # source_wise_selection: "none"
+  
+  # Keep specific data sources (list of source names to always include)
+  # keep_sources: []
+  
+  # MEZO optimizer settings
+  # mezo_optim: "adam"           # adam or sgd
+  # mezo_topk: "all"             # all or k value
+  # mezo_transform: "normalize"  # normalize, self_normalize, clip_full, clip_last
+  
+  # Save training indices for debugging
+  # save_indices: false
+  
+  # Performance monitoring
+  # include_tokens_per_second: false
+  # include_num_input_tokens_seen: false
+  
+  # Other training options
+  # ignore_data_skip: false
+  # auto_find_batch_size: false
   
   # Optimization precision
   fp16: false
@@ -153,19 +196,19 @@ optimizer_profiles:
 # Pre-defined GPU configurations - select one in active_profiles.gpu
 gpu_profiles:
   gpu_0:
-    device_ids: "0"
+    device_ids: "4"
     use_distributed: false
     device_map: "auto"
     use_tf32: true
     
   gpu_1:
-    device_ids: "1"
+    device_ids: "5"
     use_distributed: false
     device_map: "auto"
     use_tf32: true
     
   gpu_multi:
-    device_ids: "0,1"
+    device_ids: "4"
     use_distributed: true
     device_map: "auto"
     use_tf32: true
@@ -186,7 +229,7 @@ tokenizer_args:
 ################################## TRAINING BEHAVIOR ##################################
 training_behavior:
   # Gradient checkpointing for memory efficiency
-  gradient_checkpointing: true
+  gradient_checkpointing: false
   
   # Mixed precision
   use_cpu: false
@@ -202,12 +245,55 @@ training_behavior:
   # Skip samples with loss = nan
   skip_memory_metrics: false
 
+################################## SEQUENTIAL TASK CONFIGURATION (RIEMANNIAN METHOD) ##################################
+# For sequential training with task-specific datasets
+# Each task trains on model initialized with weights from previous task (cumulative learning)
+sequential_tasks_config:
+  # Enable sequential task training
+  enabled: true
+  
+  # List of tasks to train on sequentially
+  # Format: "TaskName" or "TaskName__subtask"
+  # Available tasks: SST2, Copa, BoolQ, MultiRC, CB, WIC, WSC, ReCoRD, RTE, SQuAD, DROP
+  tasks:
+    - "SST2"           # Task 0: Sentiment classification
+    - "RTE"            # Task 1: Textual entailment
+    - "BoolQ"          # Task 2: Question answering
+  
+  # Alternative: Use SuperGLUE tasks
+  # tasks:
+  #   - "Copa"         # Commonsense reasoning
+  #   - "MultiRC"      # Multi-sentence reading comprehension
+  #   - "WIC"          # Word-in-context
+  #   - "WSC"          # Winograd schema challenge
+  #   - "CB"           # Commitment Bank
+  
+  # Alternative: Use reading comprehension tasks
+  # tasks:
+  #   - "SQuAD"        # Question answering
+  #   - "DROP"         # Discrete reasoning over paragraphs
+  
+  # Per-task dataset size (number of samples to use from each task)
+  # Set to -1 to use all samples
+  samples_per_task: -1
+  
+  # Per-task validation split
+  val_split_ratio: 0.1
+  
+  # Per-task training epochs/steps
+  task_epochs: 1
+  task_max_steps: null  # Override per-task max steps if needed
+
 ################################## MULTI-TASK CONFIGURATION ##################################
 multitask_config:
+  # Number of tasks for sequential training
+  # If sequential_tasks_config.enabled=true, this is overridden by the number of tasks in the list
+  num_tasks: 3
+  
   # Per-task metrics tracking
   track_per_task_loss: true
   
-  # Task names for tracking
+  # Task names for tracking (auto-populated if using sequential_tasks_config)
   task_names:
     - "MetaMathQA"
     - "GSM8K"

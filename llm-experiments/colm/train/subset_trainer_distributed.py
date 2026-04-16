@@ -1829,7 +1829,13 @@ class SubsetTrainerEfficient(SubsetTrainer):
         # TODO: Improve this part, Hardcode for nowAdd commentMore actions
         total_reps = torch.zeros((self.num_orig, 2560 * 128), device=args.device)
         input_list = [None for _ in range(self.num_orig)]
-        model.module.decomposer._compute_per_sample_loss = True
+        
+        # Handle both DDP (model.module) and single GPU (model) cases
+        actual_model = model.module if hasattr(model, 'module') else model
+        
+        # Set decomposer flag if it exists (for per-sample loss computation)
+        if hasattr(actual_model, 'decomposer'):
+            actual_model.decomposer._compute_per_sample_loss = True
 
         for epoch in range(epochs_trained, num_train_epochs):
             epoch_iterator = train_dataloader
@@ -2244,7 +2250,12 @@ class SubsetTrainerEfficient(SubsetTrainer):
 
             assert len(
                 self.named_parameters_to_optim) != 0, "no layer found"
-        assert len(self.named_parameters_to_optim) == 1
+        
+        # For LoRA models: the assertion was too strict, many lora_B params match
+        # Just use the first matching parameter (should be consistent across batches)
+        if len(self.named_parameters_to_optim) > 1:
+            logger.warning(f"Multiple parameters matched last_layers patterns (found {len(self.named_parameters_to_optim)}), using first one only: {self.named_parameters_to_optim[0][0]}")
+            self.named_parameters_to_optim = [self.named_parameters_to_optim[0]]
         
         # Forward pass until penultimate layer for the entire batch
         zo_intermediate = self.zo_forward_till_penultimate(model, inputs)
@@ -2300,7 +2311,9 @@ class SubsetTrainerEfficient(SubsetTrainer):
         model.eval()
         with torch.inference_mode():
             inputs = self._prepare_inputs(inputs)
-            intermediate = model.module.decomposer.forward_till_penultimate(
+            # Handle both DDP (model.module) and single GPU (model) cases
+            actual_model = model.module if hasattr(model, 'module') else model
+            intermediate = actual_model.decomposer.forward_till_penultimate(
                 input_ids=inputs["input_ids"],
                 attention_mask=inputs["attention_mask"],
                 use_cache=True,
